@@ -22,10 +22,22 @@
 
 struct hwmon_sensor {
     std::regex rx;
-    std::unique_ptr<std::ifstream> stream = std::unique_ptr<std::ifstream>(new std::ifstream());
     std::string filename;
     unsigned char id = 0;
     uint64_t val = 0;
+
+    std::unique_ptr<std::ifstream> stream =
+        std::unique_ptr<std::ifstream>(new std::ifstream());
+};
+
+struct throttle_sensor {
+    std::vector<std::string> reasons;
+    bool status = false;
+
+    std::unique_ptr<std::vector<std::ifstream>> streams =
+        std::unique_ptr<std::vector<std::ifstream>>(
+            new std::vector<std::ifstream>()
+        );
 };
 
 class GPU_fdinfo {
@@ -81,6 +93,11 @@ private:
     void find_xe_gt_dir();
     int get_gpu_clock();
 
+    std::ifstream throttle_status_stream;
+    std::map<std::string, throttle_sensor> throttle_sensors;
+    void load_xe_i915_throttle_reasons(std::string throttle_folder);
+    void get_throttling_status();
+
 public:
     GPU_fdinfo(const std::string module, const std::string pci_dev)
         : module(module)
@@ -126,6 +143,15 @@ public:
         hwmon_sensors["temp"]      = { .rx = std::regex("temp(\\d+)_input") };
         hwmon_sensors["power"]     = { .rx = std::regex("power(\\d+)_input") };
         hwmon_sensors["energy"]    = { .rx = std::regex("energy(\\d+)_input") };
+
+        throttle_sensors["power"] = { .reasons = { "reason_pl1", "reason_pl2" } };
+        throttle_sensors["current"] = { .reasons = { "reason_pl4", "reason_vr_tdc" } };
+        throttle_sensors["temp"] = {
+            .reasons = {
+                "reason_prochot", "reason_ratl",
+                "reason_thermal", "reason_vr_thermalert"
+            }
+        };
 
         find_hwmon();
 

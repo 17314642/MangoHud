@@ -299,20 +299,25 @@ void GPU_fdinfo::find_i915_gt_dir()
         }
     }
 
-    device += "/gt_act_freq_mhz";
-
-    if (!fs::exists(device)) {
-        SPDLOG_WARN(
-            "Intel gt file ({}) not found. GPU clock will not be available.",
-            device
-        );
-        return;
-    }
-
-    gpu_clock_stream.open(device);
+    auto gpu_clock_path = device + "/gt_act_freq_mhz";
+    gpu_clock_stream.open(gpu_clock_path);
 
     if (!gpu_clock_stream.good())
         SPDLOG_WARN("Intel i915 gt dir: failed to open {}", device);
+
+    // Assuming gt0 since all recent GPUs have the RCS engine on gt0,
+    // and latest GPUs need Xe anyway
+    auto throttle_folder = device + "/gt/gt0/throttle_";
+    auto throttle_status_path = throttle_folder + "reason_status";
+
+    throttle_status_stream.open(throttle_status_path);
+
+    if (!throttle_status_stream.good()) {
+        SPDLOG_WARN("Intel i915 gt dir: failed to open {}", throttle_status_path);
+        return;
+    }
+
+    load_xe_i915_throttle_reasons(throttle_folder);
 }
 
 void GPU_fdinfo::find_xe_gt_dir()
@@ -351,19 +356,58 @@ void GPU_fdinfo::find_xe_gt_dir()
     }
 
     if (!has_rcs) {
-        SPDLOG_WARN(
-            "rcs not found inside \"{}\". GPU clock will not be available.",
-            device
-        );
+        SPDLOG_WARN("rcs not found inside \"{}\". GPU clock will not be available.", device);
         return;
     }
 
-    device += "/freq0/act_freq";
-
-    gpu_clock_stream.open(device);
+    auto gpu_clock_path = device + "/freq0/act_freq";
+    gpu_clock_stream.open(gpu_clock_path);
 
     if (!gpu_clock_stream.good())
-        SPDLOG_WARN("Intel xe gt dir: failed to open {}", device);
+        SPDLOG_WARN("Intel xe gt dir: failed to open {}", gpu_clock_path);
+
+    auto throttle_folder = device + "/freq0/throttle/";
+    auto throttle_status_path = throttle_folder + "status";
+
+    throttle_status_stream.open(throttle_status_path);
+    if (!throttle_status_stream.good()) {
+        SPDLOG_WARN("Intel xe gt dir: failed to open {}", throttle_status_path);
+        return;
+    }
+
+    load_xe_i915_throttle_reasons(throttle_folder);
+}
+
+void GPU_fdinfo::load_xe_i915_throttle_reasons(std::string throttle_folder)
+{
+    for (auto& ts : throttle_sensors) {
+        auto key = ts.first;
+        auto val = &ts.second;
+
+        for (auto& reason : val->reasons) {
+            auto throttle_file = throttle_folder + reason;
+
+            if (!fs::exists(throttle_file)) {
+                SPDLOG_WARN(
+                    "Intel xe/i915 gt dir: Throttle file {} not found",
+                    throttle_file
+                );
+                continue;
+            }
+
+            std::ifstream stream(throttle_file);
+
+            if (!stream.good()) {
+                SPDLOG_WARN(
+                    "Intel xe/i915 gt dir: failed to open {}",
+                    throttle_file
+                );
+                continue;
+            }
+
+            val->streams->push_back(std::move(stream));
+        }
+    }
 }
 
 int GPU_fdinfo::get_gpu_clock()
@@ -383,6 +427,50 @@ int GPU_fdinfo::get_gpu_clock()
     return std::stoi(clock_str);
 }
 
+void GPU_fdinfo::get_throttling_status()
+{
+    if (!throttle_status_stream.is_open())
+        return;
+
+    std::string throttle_status;
+    throttle_status_stream.seekg(0);
+    std::getline(throttle_status_stream, throttle_status);
+
+    if (throttle_status == "0") {
+        for (auto& ts : throttle_sensors)
+            ts.second.status = false;
+
+        return;
+    }
+
+    for (auto& ts : throttle_sensors) {
+        auto name = ts.first;
+        throttle_sensor* sensor = &ts.second;
+
+        for (auto& stream : *sensor->streams) {
+            std::string input;
+            stream.seekg(0);
+            std::getline(stream, input);
+
+            sensor->status = input == "1";
+
+            // break on first positive
+            if (sensor->status)
+                break;
+        }
+    }
+
+    bool is_other = true;
+    for (auto& ts : throttle_sensors) {
+        if (ts.second.status) {
+            is_other = false;
+            break;
+        }
+    }
+
+    throttle_sensors["other"].status = is_other;
+}
+
 void GPU_fdinfo::main_thread()
 {
     while (!stop_thread) {
@@ -391,11 +479,18 @@ void GPU_fdinfo::main_thread()
 
         gather_fdinfo_data();
         get_current_hwmon_readings();
+        get_throttling_status();
 
         metrics.load = get_gpu_load();
         metrics.memoryUsed = get_memory_used();
         metrics.powerUsage = get_power_usage();
         metrics.CoreClock = get_gpu_clock();
+
+        metrics.is_power_throttled = throttle_sensors["power"].status;
+        metrics.is_current_throttled = throttle_sensors["current"].status;
+        metrics.is_temp_throttled = throttle_sensors["temp"].status;
+        metrics.is_other_throttled = throttle_sensors["other"].status;
+
         metrics.temp = hwmon_sensors["temp"].val / 1000;
         metrics.fan_speed = hwmon_sensors["fan_speed"].val;
         metrics.voltage = hwmon_sensors["voltage"].val;
