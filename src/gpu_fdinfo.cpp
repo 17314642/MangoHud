@@ -561,6 +561,7 @@ void GPU_fdinfo::main_thread()
 
         metrics.load = get_gpu_load();
         metrics.memoryUsed = get_memory_used();
+        metrics.memory_temp = hwmon_sensors["vram_temp"].val / 1000;
         metrics.powerUsage = get_power_usage();
         metrics.CoreClock = get_gpu_clock();
         auto throttling = get_throttling_status();
