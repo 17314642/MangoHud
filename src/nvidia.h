@@ -30,13 +30,12 @@ class NVIDIA {
 #ifdef HAVE_NVML
         std::vector<int> pids() {
             std::vector<int> vec;
-            if(nvml_available) {
-                auto& nvml = get_libnvml_loader();
+            if(nvml && nvml_available) {
                 unsigned int infoCount = 0;
                 nvmlProcessInfo_t *process_info = new nvmlProcessInfo_t[infoCount];
-                nvml.nvmlDeviceGetGraphicsRunningProcesses(device, &infoCount, process_info);
+                nvml->nvmlDeviceGetGraphicsRunningProcesses(device, &infoCount, process_info);
                 process_info = new nvmlProcessInfo_t[infoCount];
-                nvml.nvmlDeviceGetGraphicsRunningProcesses(device, &infoCount, process_info);
+                nvml->nvmlDeviceGetGraphicsRunningProcesses(device, &infoCount, process_info);
                 for (size_t i = 0; i < infoCount; i++)
                     vec.push_back(static_cast<int> (process_info[i].pid));
             }
@@ -61,10 +60,12 @@ class NVIDIA {
         // std::unique_ptr<Display, std::function<void(Display*)>> display;
         int num_coolers;
         int64_t get_nvctrl_fan_speed();
+        std::shared_ptr<libnvctrl_loader> nvctrl = get_libnvctrl_loader();
 #endif
 #ifdef HAVE_NVML
         nvmlDevice_t device;
         void get_instant_metrics_nvml(struct gpu_metrics *metrics);
+        std::shared_ptr<libnvml_loader> nvml = get_libnvml_loader();
 #endif
         bool nvctrl_available;
         bool failed;
@@ -78,7 +79,7 @@ class NVIDIA {
 #if defined(HAVE_XNVCTRL) && defined(HAVE_X11)
         void get_instant_metrics_xnvctrl(struct gpu_metrics *metrics);
         void parse_token(std::string token, std::unordered_map<std::string, std::string>& options);
-        bool find_nv_x11(libnvctrl_loader& nvctrl, Display*& dpy);
-        char* get_attr_target_string(libnvctrl_loader& nvctrl, int attr, int target_type, int target_id);
+        bool find_nv_x11(Display*& dpy);
+        char* get_attr_target_string(int attr, int target_type, int target_id);
 #endif
 };
