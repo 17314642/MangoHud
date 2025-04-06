@@ -180,9 +180,14 @@ public:
         else if (module == "xe")
             find_xe_gt_dir();
 
-        std::thread thread(&GPU_fdinfo::main_thread, this);
+        thread = std::thread(&GPU_fdinfo::main_thread, this);
         pthread_setname_np(thread.native_handle(), "gpu_fdinfo");
-        thread.detach();
+    }
+
+    ~GPU_fdinfo() {
+        stop_thread = true;
+        if (thread.joinable())
+            thread.join();
     }
 
     gpu_metrics copy_metrics() const
