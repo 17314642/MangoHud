@@ -181,6 +181,7 @@ public:
             find_xe_gt_dir();
 
         std::thread thread(&GPU_fdinfo::main_thread, this);
+        pthread_setname_np(thread.native_handle(), "gpu_fdinfo");
         thread.detach();
     }
 

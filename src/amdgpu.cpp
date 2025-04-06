@@ -427,4 +427,5 @@ AMDGPU::AMDGPU(std::string pci_dev, uint32_t device_id, uint32_t vendor_id) {
 
 	throttling = std::make_shared<Throttling>(0x1002);
 	thread = std::thread(&AMDGPU::metrics_polling_thread, this);
+	pthread_setname_np(thread.native_handle(), "amdgpu");
 }
