@@ -11,7 +11,6 @@
 #include <inttypes.h>
 #include <spdlog/spdlog.h>
 #include "string_utils.h"
-#include "gpu.h"
 #include "hud_elements.h"
 
 #ifndef TEST_ONLY
@@ -290,16 +289,17 @@ bool CPUStats::ReadcpuTempFile(int& temp) {
 	return ret;
 }
 
+// TODO_2
 bool CPUStats::UpdateCpuTemp() {
-    if (!gpus)
-        gpus = std::make_unique<GPUS>(HUDElements.params);
+    // if (!gpus)
+    //     gpus = std::make_unique<GPUS>(HUDElements.params);
 
-    for (auto gpu : gpus->available_gpus) {
-        if (gpu->is_apu()) {
-            m_cpuDataTotal.temp = gpu->metrics.apu_cpu_temp;
-            return true;
-        }
-    }
+    // for (auto gpu : gpus->available_gpus) {
+    //     if (gpu->is_apu()) {
+    //         m_cpuDataTotal.temp = gpu->metrics.apu_cpu_temp;
+    //         return true;
+    //     }
+    // }
 
     int temp = 0;
     bool ret = ReadcpuTempFile(temp);
@@ -433,13 +433,14 @@ static bool get_cpu_power_rapl(CPUPowerData* cpuPowerData, float& power) {
     return true;
 }
 
+// TODO_2
 static bool get_cpu_power_amdgpu(float& power) {
-    if (gpus)
-        for (auto gpu : gpus->available_gpus)
-            if (gpu->is_apu()) {
-                power = gpu->metrics.apu_cpu_power;
-                return true;
-            }
+    // if (gpus)
+    //     for (auto gpu : gpus->available_gpus)
+    //         if (gpu->is_apu()) {
+    //             power = gpu->metrics.apu_cpu_power;
+    //             return true;
+    //         }
 
     return false;
 }
@@ -718,16 +719,17 @@ bool CPUStats::InitCpuPowerData() {
         }
     }
 
-    if (!cpuPowerData) {
-        if (gpus) {
-            for (auto gpu : gpus->available_gpus) {
-                if (gpu->vendor_id == 0x1002 && gpu->is_apu()) {
-                    auto powerData = std::make_unique<CPUPowerData_amdgpu>();
-                    cpuPowerData = (CPUPowerData*)powerData.release();
-                }
-            }
-        }
-    }
+    // TODO_2
+    // if (!cpuPowerData) {
+    //     if (gpus) {
+    //         for (auto gpu : gpus->available_gpus) {
+    //             if (gpu->vendor_id == 0x1002 && gpu->is_apu()) {
+    //                 auto powerData = std::make_unique<CPUPowerData_amdgpu>();
+    //                 cpuPowerData = (CPUPowerData*)powerData.release();
+    //             }
+    //         }
+    //     }
+    // }
 
     if (!cpuPowerData) {
         std::string powercap = "/sys/class/powercap/";

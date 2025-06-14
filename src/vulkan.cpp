@@ -60,6 +60,8 @@
 #include "implot.h"
 #endif
 
+#include "server_connection.hpp"
+
 using namespace std;
 
 float offset_x, offset_y, hudSpacing;
@@ -1887,6 +1889,7 @@ static VkResult overlay_CreateInstance(
    enum EngineTypes engine = EngineTypes::UNKNOWN;
    if (!is_blacklisted(true)) {
       const char* pEngineName = nullptr;
+
       if (pCreateInfo->pApplicationInfo)
          pEngineName = pCreateInfo->pApplicationInfo->pEngineName;
       if (pEngineName)
@@ -1964,6 +1967,8 @@ static VkResult overlay_CreateInstance(
    }
 
    instance_data->api_version = pCreateInfo->pApplicationInfo ? pCreateInfo->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
+
+   setup_connection_to_server();
 
    return result;
 }
