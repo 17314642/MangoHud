@@ -137,26 +137,33 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
             device_info();
       }
    }
-   // if (params.enabled[OVERLAY_PARAM_ENABLED_ram] || params.enabled[OVERLAY_PARAM_ENABLED_swap] || logger->is_active())
-   //    update_meminfo();
-   // if (params.enabled[OVERLAY_PARAM_ENABLED_procmem])
-   //    update_procmem();
+
    if (params.enabled[OVERLAY_PARAM_ENABLED_io_read] || params.enabled[OVERLAY_PARAM_ENABLED_io_write])
       getIoStats(g_io_stats);
 #endif
-//    if (gpus && gpus->active_gpu()) {
-//       currentLogData.gpu_load = gpus->active_gpu()->metrics.load;
-//       currentLogData.gpu_temp = gpus->active_gpu()->metrics.temp;
-//       currentLogData.gpu_core_clock = gpus->active_gpu()->metrics.CoreClock;
-//       currentLogData.gpu_mem_clock = gpus->active_gpu()->metrics.MemClock;
-//       currentLogData.gpu_vram_used = gpus->active_gpu()->metrics.sys_vram_used;
-//       currentLogData.gpu_power = gpus->active_gpu()->metrics.powerUsage;
-//    }
-// #ifdef __linux__
-//    currentLogData.ram_used = memused;
-//    currentLogData.swap_used = swapused;
-//    currentLogData.process_rss = proc_mem_resident / float((2 << 29)); // GiB, consistent w/ other mem stats
-// #endif
+
+    uint8_t gpu_idx = 0;
+    if (get_active_gpu(HUDElements.current_metrics, gpu_idx)) {
+        gpu_metrics_system_t& system = HUDElements.current_metrics.gpus[gpu_idx].system_metrics;
+        gpu_metrics_process_t& process = HUDElements.current_metrics.gpus[gpu_idx].process_metrics;
+
+        // some gpus supply only process load
+        if (system.load != -1)
+            currentLogData.gpu_load = system.load;
+        else
+            currentLogData.gpu_load = process.load;
+
+        currentLogData.gpu_temp = system.temperature;
+        currentLogData.gpu_core_clock = system.core_clock;
+        currentLogData.gpu_mem_clock = system.memory_clock;
+        currentLogData.gpu_vram_used = system.vram_used;
+        currentLogData.gpu_power = system.power_usage;
+    }
+#ifdef __linux__
+    currentLogData.ram_used = HUDElements.current_metrics.memory.used;
+    currentLogData.swap_used = HUDElements.current_metrics.memory.swap_used;
+    currentLogData.process_rss = HUDElements.current_metrics.memory.process_resident / float((2 << 29)); // GiB, consistent w/ other mem stats
+#endif
 
    currentLogData.cpu_load = cpuStats.GetCPUDataTotal().percent;
    currentLogData.cpu_temp = cpuStats.GetCPUDataTotal().temp;
