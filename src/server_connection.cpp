@@ -184,3 +184,13 @@ std::set<uint8_t> selected_gpus(const mangohud_message& msg) {
 
     return vec;
 }
+
+std::string get_gpu_text(const mangohud_message& msg, uint8_t idx) {
+    if (HUDElements.params->gpu_text.size() > idx)
+        return HUDElements.params->gpu_text[idx];
+
+    if (msg.num_of_gpus < 2)
+        return "GPU";
+
+    return "GPU" + std::to_string(idx);
+}
