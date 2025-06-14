@@ -1,4 +1,5 @@
 #pragma once
+
 #ifndef MANGOHUD_CPU_H
 #define MANGOHUD_CPU_H
 
@@ -7,11 +8,13 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <map>
+
 #ifdef WIN32
 #include <windows.h>
-#endif
+#endif // WIN32
+
 #include "timing.hpp"
-#include "gpu.h"
 
 typedef struct CPUData_ {
    unsigned long long int totalTime;

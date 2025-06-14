@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <condition_variable>
 #include <mutex>
+#include <set>
+#include "../../MangoHud-2/common/gpu_metrics.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -365,6 +367,7 @@ void add_to_options(struct overlay_params *params, std::string option, std::stri
 #ifdef __cplusplus
 }
 #endif
+
 extern std::mutex config_mtx;
 extern std::condition_variable config_cv;
 extern bool config_ready;
