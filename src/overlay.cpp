@@ -8,11 +8,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <filesystem.h>
-// #include <sys/stat.h>
+
 #include "overlay.h"
 #include "cpu.h"
-#include "gpu.h"
-#include "memory.h"
 #include "timing.hpp"
 #include "fcat.h"
 #include "mesa/util/macros.h"
@@ -22,7 +20,6 @@
 #include "file_utils.h"
 #include "pci_ids.h"
 #include "iostats.h"
-#include "amdgpu.h"
 #include "fps_metrics.h"
 #include "net.h"
 #include "fex.h"
@@ -31,7 +28,9 @@
 #ifdef __linux__
 #include <libgen.h>
 #include <unistd.h>
-#endif
+#endif // __linux__
+
+#include "server_connection.hpp"
 
 namespace fs = ghc::filesystem;
 using namespace std;
@@ -44,8 +43,8 @@ struct benchmark_stats benchmark;
 struct fps_limit fps_limit_stats {};
 ImVec2 real_font_size;
 std::deque<logData> graph_data;
-const char* engines[] = {"Unknown", "OpenGL", "VULKAN", "DXVK", "VKD3D", "DAMAVAND", "ZINK", "WINED3D", "Feral3D", "ToGL", "GAMESCOPE"};
-const char* engines_short[] = {"Unknown", "OGL", "VK", "DXVK", "VKD3D", "DV", "ZINK", "WD3D", "Feral3D", "ToGL", "GS"};
+const char* engines[]       = {"Unknown", "OpenGL", "VULKAN", "DXVK", "VKD3D", "DAMAVAND", "ZINK", "WINED3D", "Feral3D", "ToGL", "GAMESCOPE"};
+const char* engines_short[] = {"Unknown", "OGL"   , "VK"    , "DXVK", "VKD3D", "DV"      , "ZINK", "WD3D"   , "Feral3D", "ToGL", "GS"};
 overlay_params *_params {};
 double min_frametime, max_frametime;
 bool gpu_metrics_exists = false;
@@ -128,10 +127,6 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
          cpuStats.UpdateCpuPower();
 #endif
    }
-   if (params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] || logger->is_active()) {
-      if (gpus)
-         gpus->get_metrics();
-   }
 
 #ifdef __linux__
    if (params.enabled[OVERLAY_PARAM_ENABLED_battery])
@@ -142,37 +137,55 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
             device_info();
       }
    }
-   if (params.enabled[OVERLAY_PARAM_ENABLED_ram] || params.enabled[OVERLAY_PARAM_ENABLED_swap] || logger->is_active())
-      update_meminfo();
-   if (params.enabled[OVERLAY_PARAM_ENABLED_procmem])
-      update_procmem();
+   // if (params.enabled[OVERLAY_PARAM_ENABLED_ram] || params.enabled[OVERLAY_PARAM_ENABLED_swap] || logger->is_active())
+   //    update_meminfo();
+   // if (params.enabled[OVERLAY_PARAM_ENABLED_procmem])
+   //    update_procmem();
    if (params.enabled[OVERLAY_PARAM_ENABLED_io_read] || params.enabled[OVERLAY_PARAM_ENABLED_io_write])
       getIoStats(g_io_stats);
 #endif
-   if (gpus && gpus->active_gpu()) {
-      currentLogData.gpu_load = gpus->active_gpu()->metrics.load;
-      currentLogData.gpu_temp = gpus->active_gpu()->metrics.temp;
-      currentLogData.gpu_core_clock = gpus->active_gpu()->metrics.CoreClock;
-      currentLogData.gpu_mem_clock = gpus->active_gpu()->metrics.MemClock;
-      currentLogData.gpu_vram_used = gpus->active_gpu()->metrics.sys_vram_used;
-      currentLogData.gpu_power = gpus->active_gpu()->metrics.powerUsage;
-   }
-#ifdef __linux__
-   currentLogData.ram_used = memused;
-   currentLogData.swap_used = swapused;
-   currentLogData.process_rss = proc_mem_resident / float((2 << 29)); // GiB, consistent w/ other mem stats
-#endif
+//    if (gpus && gpus->active_gpu()) {
+//       currentLogData.gpu_load = gpus->active_gpu()->metrics.load;
+//       currentLogData.gpu_temp = gpus->active_gpu()->metrics.temp;
+//       currentLogData.gpu_core_clock = gpus->active_gpu()->metrics.CoreClock;
+//       currentLogData.gpu_mem_clock = gpus->active_gpu()->metrics.MemClock;
+//       currentLogData.gpu_vram_used = gpus->active_gpu()->metrics.sys_vram_used;
+//       currentLogData.gpu_power = gpus->active_gpu()->metrics.powerUsage;
+//    }
+// #ifdef __linux__
+//    currentLogData.ram_used = memused;
+//    currentLogData.swap_used = swapused;
+//    currentLogData.process_rss = proc_mem_resident / float((2 << 29)); // GiB, consistent w/ other mem stats
+// #endif
 
    currentLogData.cpu_load = cpuStats.GetCPUDataTotal().percent;
    currentLogData.cpu_temp = cpuStats.GetCPUDataTotal().temp;
    currentLogData.cpu_power = cpuStats.GetCPUDataTotal().power;
    currentLogData.cpu_mhz = cpuStats.GetCPUDataTotal().cpu_mhz;
 
+    {
+        std::unique_lock<std::mutex> lock_global_metrics(g_metrics_lock);
+        std::unique_lock<std::mutex> lock_cur_metrics(HUDElements.current_metrics_lock);
+        HUDElements.current_metrics = g_metrics;
+        mangohud_message& msg = HUDElements.current_metrics;
+
+        uint8_t idx = 0;
+
+        for (uint8_t i = 0; i < msg.num_of_gpus; i++) {
+            if (params.gpu_list.size() == 1 && params.gpu_list[0] == idx++)
+                msg.gpus[i].is_active = true;
+        }
+    }
+
    // Save data for graphs
    if (graph_data.size() >= kMaxGraphEntries)
       graph_data.pop_front();
+
    graph_data.push_back(currentLogData);
-   if (logger) logger->notify_data_valid();
+
+   if (logger)
+      logger->notify_data_valid();
+
    HUDElements.update_exec();
 }
 
@@ -250,10 +263,7 @@ void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const stru
       frametime_data.push_back(frametime_ms);
       frametime_data.erase(frametime_data.begin());
    }
-#ifdef __linux__
-   if (gpus)
-      gpus->update_throttling();
-#endif
+
 #ifdef HAVE_FEX
    fex::update_fex_stats();
 #endif

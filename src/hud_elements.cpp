@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cmath>
 #include <map>
+
 #include "overlay.h"
 #include "overlay_params.h"
 #include "hud_elements.h"
@@ -11,8 +12,6 @@
 #include "battery.h"
 #include "device.h"
 #include "cpu.h"
-#include "gpu.h"
-#include "memory.h"
 #include "iostats.h"
 #include "mesa/util/macros.h"
 #include "string_utils.h"
@@ -20,13 +19,15 @@
 #include <IconsForkAwesome.h>
 #include "version.h"
 #include "blacklist.h"
+
 #ifdef __linux__
 #include "implot.h"
-#endif
-#include "amdgpu.h"
+#endif // __linux__
+
 #include "fps_metrics.h"
 #include "fex.h"
 #include "ftrace.h"
+#include "server_connection.hpp"
 
 #define CHAR_CELSIUS    "\xe2\x84\x83"
 #define CHAR_FAHRENHEIT "\xe2\x84\x89"
@@ -271,145 +272,184 @@ void HudElements::version(){
     }
 }
 
-void HudElements::gpu_stats(){
-    if (!gpus)
-        gpus = std::make_unique<GPUS>(HUDElements.params);
+void HudElements::gpu_stats() {
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_stats])
+        return;
 
-    size_t i = 0;
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_stats]){
-        for (auto& gpu : gpus->selected_gpus()) {
-            ImguiNextColumnFirstItem();
-            HUDElements.TextColored(HUDElements.colors.gpu, "%s", gpu->gpu_text().c_str());
+    mangohud_message& metrics = HUDElements.current_metrics;
+    uint8_t idx = 0;
 
+    for (uint8_t i : selected_gpus(metrics)) {
+        gpu_t& gpu = metrics.gpus[i];
+        gpu_metrics_system_t&  system  = gpu.system_metrics;
+        gpu_metrics_process_t& process = gpu.process_metrics;
+
+        // some gpus do not supply total system load, only process load
+        int gpu_load = system.load > -1 ? system.load : process.load;
+
+        ImguiNextColumnFirstItem();
+        HUDElements.TextColored(HUDElements.colors.gpu, "GPU%d", idx);
+
+        ImguiNextColumnOrNewRow();
+        ImVec4 text_color = HUDElements.colors.text;
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_load_change]){
+            struct LOAD_DATA gpu_data = {
+                HUDElements.colors.gpu_load_low,
+                HUDElements.colors.gpu_load_med,
+                HUDElements.colors.gpu_load_high,
+                HUDElements.params->gpu_load_value[0],
+                HUDElements.params->gpu_load_value[1]
+            };
+
+            ImVec4 load_color = change_on_load_temp(gpu_data, gpu_load);
+            right_aligned_text(load_color, HUDElements.ralign_width, "%i", gpu_load);
+            ImGui::SameLine(0, 1.0f);
+            HUDElements.TextColored(load_color,"%%");
+        }
+        else {
+            right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu_load);
+            ImGui::SameLine(0, 1.0f);
+            HUDElements.TextColored(text_color,"%%");
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_temp]) {
             ImguiNextColumnOrNewRow();
-            auto text_color = HUDElements.colors.text;
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_load_change]){
-                struct LOAD_DATA gpu_data = {
-                    HUDElements.colors.gpu_load_low,
-                    HUDElements.colors.gpu_load_med,
-                    HUDElements.colors.gpu_load_high,
-                    HUDElements.params->gpu_load_value[0],
-                    HUDElements.params->gpu_load_value[1]
-                };
 
-                auto load_color = change_on_load_temp(gpu_data, gpu->metrics.load);
-                right_aligned_text(load_color, HUDElements.ralign_width, "%i", gpu->metrics.load);
-                ImGui::SameLine(0, 1.0f);
-                HUDElements.TextColored(load_color,"%%");
-            }
-            else {
-                right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.load);
-                ImGui::SameLine(0, 1.0f);
-                HUDElements.TextColored(text_color,"%%");
-                // ImGui::SameLine(150);
-                // ImGui::Text("%s", "%");
-            }
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
+                right_aligned_text(text_color, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(system.temperature));
+            else
+                right_aligned_text(text_color, HUDElements.ralign_width, "%i", system.temperature);
 
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_temp]){
-                ImguiNextColumnOrNewRow();
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(gpu->metrics.temp));
-                else
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.temp);
-                ImGui::SameLine(0, 1.0f);
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact])
-                    HUDElements.TextColored(HUDElements.colors.text, "°");
-                else
-                    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                        HUDElements.TextColored(HUDElements.colors.text, "°F");
-                    else
-                        HUDElements.TextColored(HUDElements.colors.text, "°C");
-            }
+            ImGui::SameLine(0, 1.0f);
 
-            if (gpu->metrics.junction_temp > -1 && HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_junction_temp]) {
-                ImguiNextColumnOrNewRow();
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(gpu->metrics.junction_temp));
-                else
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.junction_temp);
-                ImGui::SameLine(0, 1.0f);
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact])
+                HUDElements.TextColored(HUDElements.colors.text, "°");
+            else
                 if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
                     HUDElements.TextColored(HUDElements.colors.text, "°F");
                 else
                     HUDElements.TextColored(HUDElements.colors.text, "°C");
-                ImGui::SameLine(0, 1.0f);
-                ImGui::PushFont(HUDElements.sw_stats->font1);
-                HUDElements.TextColored(HUDElements.colors.text, "Jnc");
-                ImGui::PopFont();
-            }
-
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_fan] && !gpu->is_apu()){
-                ImguiNextColumnOrNewRow();
-                right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.fan_speed);
-                ImGui::SameLine(0, 1.0f);
-                if (gpu->metrics.fan_rpm) {
-                    ImGui::PushFont(HUDElements.sw_stats->font1);
-                    HUDElements.TextColored(HUDElements.colors.text, "RPM");
-                } else {
-                    HUDElements.TextColored(HUDElements.colors.text, "%%");
-                    ImGui::PushFont(HUDElements.sw_stats->font1);
-                    ImGui::SameLine(0, 1.0f);
-                    HUDElements.TextColored(HUDElements.colors.text, "FAN");
-                }
-                ImGui::PopFont();
-            }
-
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_core_clock]){
-                ImguiNextColumnOrNewRow();
-                right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.CoreClock);
-                ImGui::SameLine(0, 1.0f);
-                ImGui::PushFont(HUDElements.sw_stats->font1);
-                HUDElements.TextColored(HUDElements.colors.text, "MHz");
-                ImGui::PopFont();
-            }
-
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_power]) {
-                ImguiNextColumnOrNewRow();
-                char str[16];
-                snprintf(str, sizeof(str), "%.1f", gpu->metrics.powerUsage);
-                if (strlen(str) > 4)
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%.0f", gpu->metrics.powerUsage);
-                else
-                    right_aligned_text(text_color, HUDElements.ralign_width, "%.1f", gpu->metrics.powerUsage);
-                ImGui::SameLine(0, 1.0f);
-                ImGui::PushFont(HUDElements.sw_stats->font1);
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_power_limit])
-                    HUDElements.TextColored(HUDElements.colors.text, "/%.0fW", gpu->metrics.powerLimit);
-                else
-                    HUDElements.TextColored(HUDElements.colors.text, "W");
-                ImGui::PopFont();
-            }
-
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_efficiency]) {
-                ImguiNextColumnOrNewRow();
-                float efficiency;
-                const char* efficiency_unit;
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_flip_efficiency]) {
-                    efficiency=gpu->metrics.powerUsage/HUDElements.sw_stats->fps;
-                    efficiency_unit="J/F";
-                } else {
-                    efficiency=HUDElements.sw_stats->fps/gpu->metrics.powerUsage;
-                    efficiency_unit="F/J";
-                }
-                right_aligned_text(text_color, HUDElements.ralign_width, "%.2f", efficiency);
-                ImGui::SameLine(0, 1.0f);
-                ImGui::PushFont(HUDElements.sw_stats->font1);
-                HUDElements.TextColored(HUDElements.colors.text, efficiency_unit);
-                ImGui::PopFont();
-            }
-
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_voltage]) {
-                ImguiNextColumnOrNewRow();
-                right_aligned_text(text_color, HUDElements.ralign_width, "%i", gpu->metrics.voltage);
-                ImGui::SameLine(0, 1.0f);
-                ImGui::PushFont(HUDElements.sw_stats->font1);
-                HUDElements.TextColored(HUDElements.colors.text, "mV");
-                ImGui::PopFont();
-            }
-            if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal])
-                ImGui::TableNextRow();
-            i++;
         }
+
+        if (
+            HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_junction_temp] &&
+            system.junction_temperature > 0
+        ) {
+            ImguiNextColumnOrNewRow();
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
+                right_aligned_text(text_color, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(system.junction_temperature));
+            else
+                right_aligned_text(text_color, HUDElements.ralign_width, "%i", system.junction_temperature);
+
+            ImGui::SameLine(0, 1.0f);
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
+                HUDElements.TextColored(HUDElements.colors.text, "°F");
+            else
+                HUDElements.TextColored(HUDElements.colors.text, "°C");
+
+            ImGui::SameLine(0, 1.0f);
+
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+            HUDElements.TextColored(HUDElements.colors.text, "Jnc");
+            ImGui::PopFont();
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_fan] /*&& !gpu->is_apu()*/) {
+            ImguiNextColumnOrNewRow();
+
+            right_aligned_text(text_color, HUDElements.ralign_width, "%i", system.fan_speed);
+
+            ImGui::SameLine(0, 1.0f);
+
+            if (system.fan_rpm) {
+                ImGui::PushFont(HUDElements.sw_stats->font1);
+                HUDElements.TextColored(HUDElements.colors.text, "RPM");
+            } else {
+                HUDElements.TextColored(HUDElements.colors.text, "%%");
+                ImGui::PushFont(HUDElements.sw_stats->font1);
+                ImGui::SameLine(0, 1.0f);
+                HUDElements.TextColored(HUDElements.colors.text, "FAN");
+            }
+
+            ImGui::PopFont();
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_core_clock]){
+            ImguiNextColumnOrNewRow();
+
+            right_aligned_text(text_color, HUDElements.ralign_width, "%i", system.core_clock);
+
+            ImGui::SameLine(0, 1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            HUDElements.TextColored(HUDElements.colors.text, "MHz");
+
+            ImGui::PopFont();
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_power]) {
+            ImguiNextColumnOrNewRow();
+
+            if (system.power_usage > 10.f)
+                right_aligned_text(text_color, HUDElements.ralign_width, "%.0f", system.power_usage);
+            else
+                right_aligned_text(text_color, HUDElements.ralign_width, "%.1f", system.power_usage);
+
+            ImGui::SameLine(0, 1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_power_limit])
+                HUDElements.TextColored(HUDElements.colors.text, "/%.0fW", system.power_limit);
+            else
+                HUDElements.TextColored(HUDElements.colors.text, "W");
+
+            ImGui::PopFont();
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_efficiency]) {
+            ImguiNextColumnOrNewRow();
+
+            float efficiency;
+            const char* efficiency_unit;
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_flip_efficiency]) {
+                efficiency = system.power_usage / HUDElements.sw_stats->fps;
+                efficiency_unit = "J/F";
+            } else {
+                efficiency = HUDElements.sw_stats->fps / system.power_usage;
+                efficiency_unit = "F/J";
+            }
+
+            right_aligned_text(text_color, HUDElements.ralign_width, "%.2f", efficiency);
+
+            ImGui::SameLine(0, 1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            HUDElements.TextColored(HUDElements.colors.text, efficiency_unit);
+
+            ImGui::PopFont();
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_voltage]) {
+            ImguiNextColumnOrNewRow();
+
+            right_aligned_text(text_color, HUDElements.ralign_width, "%i", system.voltage);
+
+            ImGui::SameLine(0, 1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            HUDElements.TextColored(HUDElements.colors.text, "mV");
+
+            ImGui::PopFont();
+        }
+
+        if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal])
+            ImGui::TableNextRow();
+
+        idx++;
     }
 }
 
@@ -607,64 +647,74 @@ void HudElements::io_stats(){
 #endif
 }
 
-void HudElements::vram(){
-    if (!gpus)
-        gpus = std::make_unique<GPUS>(HUDElements.params);
+void HudElements::vram() {
+    if (
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_vram] ||
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_stats]
+    )
+        return;
 
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_vram]){
-        size_t i = 0;
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_stats]){
-            for (auto& gpu : gpus->selected_gpus()) {
-                ImguiNextColumnFirstItem();
-                // Just iterate through the user selected GPUs
-                if (!HUDElements.params->gpu_list.empty())
-                    for (auto& gpu_index : HUDElements.params->gpu_list)
-                        if (gpu_index < gpus->available_gpus.size())
-                            if (i != gpu_index)
-                                continue;
+    mangohud_message& metrics = HUDElements.current_metrics;
+    uint8_t idx = 0;
 
+    for (uint8_t i : selected_gpus(metrics)) {
+        gpu_t& gpu = metrics.gpus[i];
+        gpu_metrics_system_t& system = gpu.system_metrics;
 
-                HUDElements.TextColored(HUDElements.colors.vram, gpu->vram_text().c_str());
+        ImguiNextColumnFirstItem();
 
-                ImguiNextColumnOrNewRow();
-                // Add gtt_used to vram usage for APUs
-                if (gpu->is_apu())
-                    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", gpu->metrics.sys_vram_used + gpu->metrics.gtt_used);
-                else
-                    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", gpu->metrics.sys_vram_used);
-                if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]){
-                    ImGui::SameLine(0,1.0f);
-                    ImGui::PushFont(HUDElements.sw_stats->font1);
-                    HUDElements.TextColored(HUDElements.colors.text, "GiB");
-                    ImGui::PopFont();
-                }
+        HUDElements.TextColored(HUDElements.colors.vram, "VRAM%d", idx);
 
-                if (gpu->metrics.memory_temp > -1 && HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_mem_temp]) {
-                    ImguiNextColumnOrNewRow();
-                    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(gpu->metrics.memory_temp));
-                    else
-                        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", gpu->metrics.memory_temp);
-                    ImGui::SameLine(0, 1.0f);
-                    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                        HUDElements.TextColored(HUDElements.colors.text, "°F");
-                    else
-                        HUDElements.TextColored(HUDElements.colors.text, "°C");
-                }
+        ImguiNextColumnOrNewRow();
 
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_mem_clock]){
-                    ImguiNextColumnOrNewRow();
-                    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", gpu->metrics.MemClock);
-                    ImGui::SameLine(0, 1.0f);
-                    ImGui::PushFont(HUDElements.sw_stats->font1);
-                    HUDElements.TextColored(HUDElements.colors.text, "MHz");
-                    ImGui::PopFont();
-                }
-                if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal])
-                    ImGui::TableNextRow();
-                i++;
-            }
+        // Add gtt_used to vram usage for APUs
+        // if (gpu->is_apu())
+        //     right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", gpu->metrics.sys_vram_used + gpu->metrics.gtt_used);
+        // else
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", system.vram_used);
+
+        if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]) {
+            ImGui::SameLine(0,1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            HUDElements.TextColored(HUDElements.colors.text, "GiB");
+
+            ImGui::PopFont();
         }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_mem_temp]) {
+            ImguiNextColumnOrNewRow();
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(system.memory_temp));
+            else
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", system.memory_temp);
+
+            ImGui::SameLine(0, 1.0f);
+
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
+                HUDElements.TextColored(HUDElements.colors.text, "°F");
+            else
+                HUDElements.TextColored(HUDElements.colors.text, "°C");
+        }
+
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_gpu_mem_clock]){
+            ImguiNextColumnOrNewRow();
+
+            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", system.memory_clock);
+
+            ImGui::SameLine(0, 1.0f);
+            ImGui::PushFont(HUDElements.sw_stats->font1);
+
+            HUDElements.TextColored(HUDElements.colors.text, "MHz");
+
+            ImGui::PopFont();
+        }
+
+        if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal])
+            ImGui::TableNextRow();
+
+        idx++;
     }
 }
 
@@ -675,26 +725,30 @@ void HudElements::proc_vram() {
     )
         return;
 
-    if (!gpus)
-        gpus = std::make_unique<GPUS>(HUDElements.params);
+    mangohud_message& metrics = HUDElements.current_metrics;
+    uint8_t gpu_idx = 0;
 
-    auto gpu = gpus->active_gpu();
+    for (uint8_t i = 0; i < metrics.num_of_gpus; i++) {
+        if (!metrics.gpus[i].is_active)
+            continue;
 
-    if (!gpu)
-        return;
+        gpu_idx = i;
+    }
+
+    gpu_metrics_system_t&  system  = metrics.gpus[gpu_idx].system_metrics;
+    gpu_metrics_process_t& process = metrics.gpus[gpu_idx].process_metrics;
 
     ImguiNextColumnFirstItem();
     HUDElements.TextColored(HUDElements.colors.vram, "PVRAM");
     ImguiNextColumnOrNewRow();
 
-    right_aligned_text(
-        HUDElements.colors.text, HUDElements.ralign_width, "%.1f", gpu->metrics.proc_vram_used
-    );
+    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", process.vram_used);
 
     if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]) {
         ImGui::SameLine(0, 1.0f);
         ImGui::PushFont(HUDElements.sw_stats->font1);
         HUDElements.TextColored(HUDElements.colors.text, "GiB");
+
         ImGui::PopFont();
     }
 
@@ -709,10 +763,10 @@ void HudElements::proc_vram() {
         std::string unit;
 
         if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit]) {
-            temp = HUDElements.convert_to_fahrenheit(gpu->metrics.memory_temp);
+            temp = HUDElements.convert_to_fahrenheit(system.memory_temp);
             unit = "°F";
         } else {
-            temp = gpu->metrics.memory_temp;
+            temp = system.memory_temp;
             unit = "°C";
         }
 
@@ -727,67 +781,81 @@ void HudElements::proc_vram() {
         ImGui::TableNextRow();
 }
 
-void HudElements::ram(){
-#ifdef __linux__
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_ram]){
-        ImguiNextColumnFirstItem();
-        HUDElements.TextColored(HUDElements.colors.ram, "RAM");
-        ImguiNextColumnOrNewRow();
-        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", memused);
-        if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]){
-            ImGui::SameLine(0, 1.0f);
-            ImGui::PushFont(HUDElements.sw_stats->font1);
-            HUDElements.TextColored(HUDElements.colors.text, "GiB");
-            ImGui::PopFont();
-        }
-    }
+void HudElements::ram() {
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_ram])
+        return;
 
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_ram] && HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_swap]){
-        ImguiNextColumnOrNewRow();
-        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", swapused);
+    memory_t& mem = HUDElements.current_metrics.memory;
+
+    ImguiNextColumnFirstItem();
+    HUDElements.TextColored(HUDElements.colors.ram, "RAM");
+    ImguiNextColumnOrNewRow();
+
+    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", mem.used);
+
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]){
         ImGui::SameLine(0, 1.0f);
         ImGui::PushFont(HUDElements.sw_stats->font1);
         HUDElements.TextColored(HUDElements.colors.text, "GiB");
         ImGui::PopFont();
     }
-#endif
+
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_swap])
+        return;
+    
+    ImguiNextColumnOrNewRow();
+    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", mem.swap_used);
+    ImGui::SameLine(0, 1.0f);
+    ImGui::PushFont(HUDElements.sw_stats->font1);
+    HUDElements.TextColored(HUDElements.colors.text, "GiB");
+    ImGui::PopFont();
 }
 
 void HudElements::procmem()
 {
-#ifdef __linux__
-    const char* unit = nullptr;
-
     if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_procmem])
         return;
 
+    const char* unit = nullptr;
+    memory_t& mem = HUDElements.current_metrics.memory;
+
     ImguiNextColumnFirstItem();
+
     HUDElements.TextColored(HUDElements.colors.ram, "PMEM");
+
     ImguiNextColumnOrNewRow();
-    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(proc_mem_resident, unit));
+
+    right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(mem.process_resident, unit));
+
     ImGui::SameLine(0, 1.0f);
     ImGui::PushFont(HUDElements.sw_stats->font1);
     HUDElements.TextColored(HUDElements.colors.text, "%s", unit);
+
     ImGui::PopFont();
 
     if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_procmem_shared]) {
         ImguiNextColumnOrNewRow();
-        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(proc_mem_shared, unit));
+
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(mem.process_shared, unit));
+
         ImGui::SameLine(0,1.0f);
         ImGui::PushFont(HUDElements.sw_stats->font1);
         HUDElements.TextColored(HUDElements.colors.text, "%s", unit);
+
         ImGui::PopFont();
     }
 
     if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_procmem_virt]) {
         ImguiNextColumnOrNewRow();
-        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(proc_mem_virt, unit));
+
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", format_units(mem.process_virtual, unit));
+
         ImGui::SameLine(0, 1.0f);
         ImGui::PushFont(HUDElements.sw_stats->font1);
         HUDElements.TextColored(HUDElements.colors.text, "%s", unit);
+
         ImGui::PopFont();
     }
-#endif
 }
 
 void HudElements::fps(){
@@ -941,118 +1009,150 @@ static inline double TransformInverse_Custom(double v, void*) {
    return v;
 }
 
-void HudElements::frame_timing(){
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing]){
-        if (!gpus)
-            gpus = std::make_unique<GPUS>(HUDElements.params);
+void HudElements::frame_timing() {
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing])
+        return;
 
+    mangohud_message& msg = HUDElements.current_metrics;
+    uint8_t gpu_idx = 0;
+    bool have_active_gpu = get_active_gpu(msg, gpu_idx);
+
+    ImguiNextColumnFirstItem();
+    ImGui::PushFont(HUDElements.sw_stats->font1);
+
+    if (
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal] &&
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]
+    ) {
+        ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
+
+        HUDElements.TextColored(HUDElements.colors.engine, "%s", "Frametime");
+
+        ImGui::TableSetColumnIndex(ImGui::TableGetColumnCount() - 1);
+        ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
+
+        right_aligned_text(
+            HUDElements.colors.text, ImGui::GetContentRegionAvail().x,
+            "min: %.1fms, max: %.1fms", min_frametime, max_frametime
+        );
+
+        ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
         ImguiNextColumnFirstItem();
-        ImGui::PushFont(HUDElements.sw_stats->font1);
-        if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal] && !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]){
-            ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
-            HUDElements.TextColored(HUDElements.colors.engine, "%s", "Frametime");
-            ImGui::TableSetColumnIndex(ImGui::TableGetColumnCount() - 1);
-            ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
-            right_aligned_text(HUDElements.colors.text, ImGui::GetContentRegionAvail().x, "min: %.1fms, max: %.1fms", min_frametime, max_frametime);
-            ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
-            ImguiNextColumnFirstItem();
-        }
-        char hash[40];
-        snprintf(hash, sizeof(hash), "##%s", overlay_param_names[OVERLAY_PARAM_ENABLED_frame_timing]);
-        HUDElements.sw_stats->stat_selector = OVERLAY_PLOTS_frame_timing;
-        HUDElements.sw_stats->time_dividor = 1000000.0f; /* ns -> ms */
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        double min_time = 0.0f;
-        double max_time = 50.0f;
-        float width, height = 0;
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal]){
-            width = 150;
-            height = HUDElements.params->font_size * 0.85;
+    }
+
+    char hash[40];
+    snprintf(hash, sizeof(hash), "##%s", overlay_param_names[OVERLAY_PARAM_ENABLED_frame_timing]);
+
+    HUDElements.sw_stats->stat_selector = OVERLAY_PLOTS_frame_timing;
+    HUDElements.sw_stats->time_dividor = 1000000.0f; /* ns -> ms */
+
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+
+    double min_time = 0.0f;
+    double max_time = 50.0f;
+    float width, height = 0;
+
+    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal]){
+        width = 150;
+        height = HUDElements.params->font_size * 0.85;
+    } else {
+        width = (ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x);
+        height = max_time;
+    }
+
+    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_dynamic_frame_timing]){
+        min_time = min_frametime;
+        max_time = max_frametime;
+    }
+    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing_detailed]){
+        height = 125;
+    }
+
+    if (ImGui::BeginChild("my_child_window", ImVec2(width, height), false, ImGuiWindowFlags_NoDecoration)) {
+        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_histogram]) {
+            ImGui::PlotHistogram(
+                hash, get_time_stat, HUDElements.sw_stats,
+                ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
+                NULL, min_time, max_time,
+                ImVec2(width, height)
+            );
         } else {
-            width = (ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x);
-            height = max_time;
-        }
-
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_dynamic_frame_timing]){
-            min_time = min_frametime;
-            max_time = max_frametime;
-        }
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing_detailed]){
-            height = 125;
-        }
-
-        if (ImGui::BeginChild("my_child_window", ImVec2(width, height), false, ImGuiWindowFlags_NoDecoration)) {
-            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_histogram]){
-                ImGui::PlotHistogram(hash, get_time_stat, HUDElements.sw_stats,
-                                    ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
-                                    NULL, min_time, max_time,
-                                    ImVec2(width, height));
-            } else {
 #ifndef __linux__
-                ImGui::PlotLines(hash, get_time_stat, HUDElements.sw_stats,
-                                ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
-                                NULL, min_time, max_time,
-                                ImVec2(width, height));
+            ImGui::PlotLines(
+                hash, get_time_stat, HUDElements.sw_stats,
+                ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
+                NULL, min_time, max_time,
+                ImVec2(width, height)
+            );
 #else
 
-                if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal]) {
-                    ImGui::PlotLines(hash, get_time_stat, HUDElements.sw_stats,
-                    ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
-                    NULL, min_time, max_time,
-                    ImVec2(width, height));
-                } else {
-                    if (ImPlot::BeginPlot("My Plot", ImVec2(width, height), ImPlotFlags_CanvasOnly | ImPlotFlags_NoInputs)) {
-                        ImPlotStyle& style = ImPlot::GetStyle();
-                        style.Colors[ImPlotCol_PlotBg] = ImVec4(0.92f, 0.92f, 0.95f, 0.00f);
-                        style.Colors[ImPlotCol_AxisGrid] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-                        style.Colors[ImPlotCol_AxisTick] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-                        ImPlotAxisFlags ax_flags_x = ImPlotAxisFlags_NoDecorations;
-                        ImPlotAxisFlags ax_flags_y = ImPlotAxisFlags_NoDecorations;
-                        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing_detailed])
-                            ax_flags_y = ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoMenus;
+            if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal]) {
+                ImGui::PlotLines(hash, get_time_stat, HUDElements.sw_stats,
+                ARRAY_SIZE(HUDElements.sw_stats->frames_stats), 0,
+                NULL, min_time, max_time,
+                ImVec2(width, height));
+            } else {
+                if (ImPlot::BeginPlot("My Plot", ImVec2(width, height), ImPlotFlags_CanvasOnly | ImPlotFlags_NoInputs)) {
+                    ImPlotStyle& style = ImPlot::GetStyle();
 
-                        ImPlot::SetupAxes(nullptr, nullptr, ax_flags_x, ax_flags_y);
-                        ImPlot::SetupAxisScale(ImAxis_Y1, TransformForward_Custom, TransformInverse_Custom);
-                        ImPlot::SetupAxesLimits(0, 200, min_time, max_time);
-                        ImPlot::SetNextLineStyle(HUDElements.colors.frametime, 1.5);
-                        ImPlot::PlotLine("frametime line", frametime_data.data(), frametime_data.size());
-                        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status_graph] &&
-                            gpus->active_gpu() && gpus->active_gpu()->throttling()){
-                            ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), 1.5);
-                            ImPlot::PlotLine("power line", gpus->active_gpu()->throttling()->power.data(), gpus->active_gpu()->throttling()->power.size());
-                            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), 1.5);
-                            ImPlot::PlotLine("thermal line", gpus->active_gpu()->throttling()->thermal.data(), gpus->active_gpu()->throttling()->thermal.size());
-                        }
-                        ImPlot::EndPlot();
-                    }
+                    style.Colors[ImPlotCol_PlotBg] = ImVec4(0.92f, 0.92f, 0.95f, 0.00f);
+                    style.Colors[ImPlotCol_AxisGrid] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                    style.Colors[ImPlotCol_AxisTick] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+                    ImPlotAxisFlags ax_flags_x = ImPlotAxisFlags_NoDecorations;
+                    ImPlotAxisFlags ax_flags_y = ImPlotAxisFlags_NoDecorations;
+
+                    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_frame_timing_detailed])
+                        ax_flags_y = ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoMenus;
+
+                    ImPlot::SetupAxes(nullptr, nullptr, ax_flags_x, ax_flags_y);
+                    ImPlot::SetupAxisScale(ImAxis_Y1, TransformForward_Custom, TransformInverse_Custom);
+                    ImPlot::SetupAxesLimits(0, 200, min_time, max_time);
+                    ImPlot::SetNextLineStyle(HUDElements.colors.frametime, 1.5);
+                    ImPlot::PlotLine("frametime line", frametime_data.data(), frametime_data.size());
+
+                    // if (
+                    //     HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status_graph] &&
+                    //     have_active_gpu
+                    // ) {
+                    //     ImPlot::SetNextLineStyle(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), 1.5);
+                    //     ImPlot::PlotLine("power line", gpus->active_gpu()->throttling()->power.data(), gpus->active_gpu()->throttling()->power.size());
+                    //     ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), 1.5);
+                    //     ImPlot::PlotLine("thermal line", gpus->active_gpu()->throttling()->thermal.data(), gpus->active_gpu()->throttling()->thermal.size());
+                    // }
+
+                    ImPlot::EndPlot();
                 }
+            }
 #endif
-            }
         }
-        ImGui::EndChild();
-#ifdef __linux__
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status_graph] &&
-            gpus->active_gpu() && gpus->active_gpu()->throttling()){
-            ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
-
-            if (gpus->active_gpu()->throttling()->power_throttling()) {
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "%s", ICON_FK_SQUARE);
-                ImGui::SameLine();
-                ImGui::Text("Power throttling");
-            }
-
-            ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
-
-            if (gpus->active_gpu()->throttling()->thermal_throttling()) {
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", ICON_FK_SQUARE);
-                ImGui::SameLine();
-                ImGui::Text("Thermal throttling");
-            }
-        }
-        ImGui::PopFont();
-        ImGui::PopStyleColor();
-#endif
     }
+
+    ImGui::EndChild();
+
+    if (
+        HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status_graph] &&
+        have_active_gpu
+    ) {
+        ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
+
+        if (msg.gpus[gpu_idx].system_metrics.is_power_throttled) {
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "%s", ICON_FK_SQUARE);
+            ImGui::SameLine();
+            ImGui::Text("Power throttling");
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, real_font_size.y / 2));
+
+        if (msg.gpus[gpu_idx].system_metrics.is_temp_throttled) {
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", ICON_FK_SQUARE);
+            ImGui::SameLine();
+            ImGui::Text("Thermal throttling");
+        }
+    }
+
+    ImGui::PopFont();
+    ImGui::PopStyleColor();
 }
 
 void HudElements::media_player(){
@@ -1436,29 +1536,40 @@ void HudElements::fan(){
 }
 
 void HudElements::throttling_status(){
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status]){
-        if (!gpus)
-            gpus = std::make_unique<GPUS>(HUDElements.params);
+    if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_throttling_status])
+        return;
 
-        auto gpu = gpus->active_gpu();
-        if (!gpu)
-            return;
+    mangohud_message& msg = HUDElements.current_metrics;
+    uint8_t gpu_idx = 0;
 
-        if ((gpu->metrics.is_power_throttled || gpu->metrics.is_current_throttled || gpu->metrics.is_temp_throttled || gpu->metrics.is_other_throttled)){
-            ImguiNextColumnFirstItem();
-            HUDElements.TextColored(HUDElements.colors.engine, "%s", "Throttling");
-            ImguiNextColumnOrNewRow();
-            ImguiNextColumnOrNewRow();
-            if (gpu->metrics.is_power_throttled)
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Power");
-            if (gpu->metrics.is_current_throttled)
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Current");
-            if (gpu->metrics.is_temp_throttled)
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Temp");
-            if (gpu->metrics.is_other_throttled)
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Other");
-        }
-    }
+    if (!get_active_gpu(msg, gpu_idx))
+        return;
+
+    gpu_metrics_system_t& system = msg.gpus[gpu_idx].system_metrics;
+
+    if (!(
+        system.is_current_throttled || system.is_other_throttled ||
+        system.is_power_throttled || system.is_temp_throttled)
+    )
+        return;
+
+
+    ImguiNextColumnFirstItem();
+    HUDElements.TextColored(HUDElements.colors.engine, "%s", "Throttling");
+    ImguiNextColumnOrNewRow();
+    ImguiNextColumnOrNewRow();
+
+    if (system.is_power_throttled)
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Power");
+
+    if (system.is_current_throttled)
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Current");
+
+    if (system.is_temp_throttled)
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Temp");
+
+    if (system.is_other_throttled)
+        right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "Other");
 }
 
 void HudElements::duration(){
@@ -1480,14 +1591,21 @@ void HudElements::duration(){
     ImGui::PopFont();
 }
 
-void HudElements::graphs(){
+void HudElements::graphs() {
     ImguiNextColumnFirstItem();
     ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
+
     const std::string& value = HUDElements.ordered_functions[HUDElements.place].value;
     assert(kMaxGraphEntries >= graph_data.size());
+
     std::vector<float> arr(kMaxGraphEntries - graph_data.size());
 
     ImGui::PushFont(HUDElements.sw_stats->font1);
+
+    mangohud_message& msg = HUDElements.current_metrics;
+    uint8_t gpu_idx = 0;
+    bool have_active_gpu = get_active_gpu(msg, gpu_idx);
+
     if (value == "cpu_load"){
         for (auto& it : graph_data){
             arr.push_back(float(it.cpu_load));
@@ -1554,18 +1672,12 @@ void HudElements::graphs(){
         HUDElements.TextColored(HUDElements.colors.engine, "%s", "GPU Mem Clock");
     }
 
-    if (value == "vram"){
+    if (value == "vram" && have_active_gpu) {
         for (auto& it : graph_data){
             arr.push_back(float(it.gpu_vram_used));
         }
-        if (!gpus)
-            gpus = std::make_unique<GPUS>(HUDElements.params);
 
-        auto gpu = gpus->active_gpu();
-        if (!gpu)
-            return;
-
-        HUDElements.max = gpu->metrics.memoryTotal;
+        HUDElements.max = msg.gpus[gpu_idx].system_metrics.memory_total;
         HUDElements.min = 0;
         HUDElements.TextColored(HUDElements.colors.engine, "%s", "VRAM");
     }
@@ -1577,7 +1689,7 @@ void HudElements::graphs(){
             arr.push_back(float(it.ram_used));
         }
 
-        HUDElements.max = memmax;
+        HUDElements.max = msg.memory.total;
         HUDElements.min = 0;
         HUDElements.TextColored(HUDElements.colors.engine, "%s", "RAM");
     }

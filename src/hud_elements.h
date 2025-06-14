@@ -1,4 +1,5 @@
 #pragma once
+
 #include <vector>
 #include <string>
 #include <utility>
@@ -12,7 +13,7 @@
 #include "net.h"
 #include "overlay_params.h"
 #include "shell.h"
-#include "gpu.h"
+#include "../../MangoHud-2/common/gpu_metrics.hpp"
 
 struct Function {
     std::function<void()> run;  // Using std::function instead of a raw function pointer for more flexibility
@@ -180,6 +181,9 @@ class HudElements{
                 return vsync == 0 ? "OFF" : "ON";
 
         }
+
+        std::mutex current_metrics_lock;
+        mangohud_message current_metrics;
 };
 
 extern HudElements HUDElements;

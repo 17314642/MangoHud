@@ -57,12 +57,8 @@ vklayer_files = files(
   'font_unispace.c',
   'logging.cpp',
   'config.cpp',
-  'gpu.cpp',
   'blacklist.cpp',
   'file_utils.cpp',
-  'nvidia.cpp',
-  'gpu_fdinfo.cpp',
-  'amdgpu.cpp'
 )
 
 opengl_files  = []
@@ -82,8 +78,10 @@ endif
 
 if is_unixy
   vklayer_files += files(
+    'server_connection.cpp',
+    '../../MangoHud-2/common/socket.cpp',
+
     'cpu.cpp',
-    'memory.cpp',
     'iostats.cpp',
     'notify.cpp',
     'elfhacks.c',
@@ -123,9 +121,7 @@ if is_unixy
   if nvml_h_found
     pre_args += '-DHAVE_NVML'
     pre_args += '-DNVML_NO_UNVERSIONED_FUNC_DEFS'
-    vklayer_files += files(
-      'loaders/loader_nvml.cpp',
-    )
+    # vklayer_files += files()
   endif
 
   if get_option('with_xnvctrl').enabled()
@@ -140,9 +136,9 @@ if is_unixy
     endif
 
     pre_args += '-DHAVE_XNVCTRL'
-    vklayer_files += files(
-      'loaders/loader_nvctrl.cpp'
-    )
+    # vklayer_files += files(
+    #   'loaders/loader_nvctrl.cpp'
+    # )
   endif
 
   if get_option('with_x11').enabled()
