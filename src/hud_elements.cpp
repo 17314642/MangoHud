@@ -278,8 +278,9 @@ void HudElements::gpu_stats() {
 
     mangohud_message& metrics = HUDElements.current_metrics;
     uint8_t idx = 0;
+    std::set<uint8_t> gpus = selected_gpus(metrics);
 
-    for (uint8_t i : selected_gpus(metrics)) {
+    for (uint8_t i : gpus) {
         gpu_t& gpu = metrics.gpus[i];
         gpu_metrics_system_t&  system  = gpu.system_metrics;
         gpu_metrics_process_t& process = gpu.process_metrics;
@@ -288,7 +289,8 @@ void HudElements::gpu_stats() {
         int gpu_load = system.load > -1 ? system.load : process.load;
 
         ImguiNextColumnFirstItem();
-        HUDElements.TextColored(HUDElements.colors.gpu, "GPU%d", idx);
+
+        HUDElements.TextColored(HUDElements.colors.gpu, "%s", get_gpu_text(metrics, i).c_str());
 
         ImguiNextColumnOrNewRow();
         ImVec4 text_color = HUDElements.colors.text;
@@ -656,14 +658,18 @@ void HudElements::vram() {
 
     mangohud_message& metrics = HUDElements.current_metrics;
     uint8_t idx = 0;
+    std::set<uint8_t> gpus = selected_gpus(metrics);
 
-    for (uint8_t i : selected_gpus(metrics)) {
+    for (uint8_t i : gpus) {
         gpu_t& gpu = metrics.gpus[i];
         gpu_metrics_system_t& system = gpu.system_metrics;
 
         ImguiNextColumnFirstItem();
 
-        HUDElements.TextColored(HUDElements.colors.vram, "VRAM%d", idx);
+        if (gpus.size() < 2)
+            HUDElements.TextColored(HUDElements.colors.vram, "VRAM");
+        else
+            HUDElements.TextColored(HUDElements.colors.vram, "VRAM%d", idx);
 
         ImguiNextColumnOrNewRow();
 
@@ -728,12 +734,8 @@ void HudElements::proc_vram() {
     mangohud_message& metrics = HUDElements.current_metrics;
     uint8_t gpu_idx = 0;
 
-    for (uint8_t i = 0; i < metrics.num_of_gpus; i++) {
-        if (!metrics.gpus[i].is_active)
-            continue;
-
-        gpu_idx = i;
-    }
+    if (!get_active_gpu(metrics, gpu_idx))
+        return;
 
     gpu_metrics_system_t&  system  = metrics.gpus[gpu_idx].system_metrics;
     gpu_metrics_process_t& process = metrics.gpus[gpu_idx].process_metrics;
