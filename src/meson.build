@@ -176,7 +176,7 @@ link_args = cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z
 link_args += '-Wl,--version-script,@0@'.format(join_paths(meson.current_source_dir(), 'mangohud.version'))
 
 mangohud_static_lib = static_library(
-  'MangoHud',
+  'MangoHud-2',
   mangohud_version,
   files('vulkan.cpp'),
   util_files,
@@ -211,7 +211,7 @@ mangohud_static_lib = static_library(
 )
 
 mangohud_shared_lib = shared_library(
-  'MangoHud',
+  'MangoHud-2',
   objects: mangohud_static_lib.extract_all_objects(),
   link_with: mangohud_static_lib,
   link_args : link_args,
@@ -220,7 +220,7 @@ mangohud_shared_lib = shared_library(
 )
 
 mangohud_opengl_shared_lib = shared_library(
-  'MangoHud_opengl',
+  'MangoHud-2_opengl',
   mangohud_version,
   opengl_files,
   vklayer_files,
@@ -252,55 +252,55 @@ mangohud_opengl_shared_lib = shared_library(
   install: true
 )
 
-if get_option('mangoapp')
-  if not get_option('with_x11').enabled()
-    error('mangoapp also needs \'with_x11\'')
-  endif
-  pre_args += '-DMANGOAPP'
-  mangoapp = executable(
-    'mangoapp',
-    files(
-      'app/main.cpp',
-    ),
-    c_args : [
-      pre_args,
-      vulkan_wsi_args
-    ],
-    cpp_args : [
-      pre_args,
-      vulkan_wsi_args
-    ],
-    gnu_symbol_visibility : 'hidden',
-    dependencies : [
-      dearimgui_dep,
-      dep_dl,
-      dep_vulkan,
-      spdlog_dep,
-      dbus_dep,
-      dep_x11,
-      dep_wayland_client,
-      glfw3_dep,
-      implot_dep
-    ],
-    include_directories : [inc_common],
-    install_tag : 'mangoapp',
-    link_with: mangohud_static_lib,
-    link_args : link_args,
-    install : true
-  )
-endif
+#if get_option('mangoapp')
+#  if not get_option('with_x11').enabled()
+#    error('mangoapp also needs \'with_x11\'')
+#  endif
+#  pre_args += '-DMANGOAPP'
+#  mangoapp = executable(
+#    'mangoapp',
+#    files(
+#      'app/main.cpp',
+#    ),
+#    c_args : [
+#      pre_args,
+#      vulkan_wsi_args
+#    ],
+#    cpp_args : [
+#      pre_args,
+#      vulkan_wsi_args
+#    ],
+#    gnu_symbol_visibility : 'hidden',
+#    dependencies : [
+#      dearimgui_dep,
+#      dep_dl,
+#      dep_vulkan,
+#      spdlog_dep,
+#      dbus_dep,
+#      dep_x11,
+#      dep_wayland_client,
+#      glfw3_dep,
+#      implot_dep
+#    ],
+#    include_directories : [inc_common],
+#    install_tag : 'mangoapp',
+#    link_with: mangohud_static_lib,
+#    link_args : link_args,
+#    install : true
+#  )
+#endif
 
-if get_option('mangohudctl')
-mangoapp = executable(
-  'mangohudctl',
-  files('app/control.c'),
-  install_tag : 'mangoapp', #TODO MangoHud layer itself currently doesn't support it
-  install : true
-)
-endif
+#if get_option('mangohudctl')
+#mangoapp = executable(
+#  'mangohudctl',
+#  files('app/control.c'),
+#  install_tag : 'mangoapp', #TODO MangoHud layer itself currently doesn't support it
+#  install : true
+#)
+#endif
 if is_unixy
   mangohud_shim = shared_library(
-    'MangoHud_shim',
+    'MangoHud-2_shim',
     files(
       'gl/shim.c',
       'real_dlsym.c',
@@ -330,7 +330,7 @@ configure_file(input : 'mangohud.json.in',
 )
 
 configure_file(input : '../bin/mangohud.in',
-  output : 'mangohud',
+  output : 'mangohud-2',
   configuration : conf_data,
   install_dir : get_option('bindir'),
   install_tag : 'scripts',
