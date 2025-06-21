@@ -220,12 +220,12 @@ elif sizeof_ptr == 4
   pre_args += '-DMANGOHUD_ARCH="32bit"'
 endif
 
-if get_option('mangoapp')
-  imgui_options += [
-    'opengl=enabled',
-    'glfw=enabled',
-  ]
-endif
+#if get_option('mangoapp')
+#  imgui_options += [
+#    'opengl=enabled',
+#    'glfw=enabled',
+#  ]
+#endif
 dearimgui_dep = dependency('imgui', fallback: ['imgui'], required: true, default_options: imgui_options)
 
 if is_unixy
@@ -263,15 +263,15 @@ else
   windows_deps = null_dep
 endif
 
-if get_option('mangoapp')
-  glfw3_dep = dependency('glfw3')
-endif
+#if get_option('mangoapp')
+#  glfw3_dep = dependency('glfw3')
+#endif
 
 subdir('src')
 
-if get_option('include_doc')
-  subdir('data')
-endif
+#if get_option('include_doc')
+#  subdir('data')
+#endif
 
 if get_option('tests').enabled()
   # cmocka_dep = dependency('cmocka', fallback: ['cmocka', 'cmocka_dep'])
@@ -301,6 +301,6 @@ if get_option('tests').enabled()
 endif
 
 # install helper scripts
-if get_option('mangoplot').enabled()
-  subdir('bin')
-endif
+#if get_option('mangoplot').enabled()
+#  subdir('bin')
+#endif
