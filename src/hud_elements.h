@@ -13,7 +13,7 @@
 #include "net.h"
 #include "overlay_params.h"
 #include "shell.h"
-#include "../../MangoHud-2/common/gpu_metrics.hpp"
+#include "../../mangohud-server/common/gpu_metrics.hpp"
 
 struct Function {
     std::function<void()> run;  // Using std::function instead of a raw function pointer for more flexibility

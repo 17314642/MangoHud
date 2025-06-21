@@ -9,7 +9,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <set>
-#include "../../MangoHud-2/common/gpu_metrics.hpp"
+#include "../../mangohud-server/common/gpu_metrics.hpp"
 
 #ifdef __cplusplus
 extern "C" {

@@ -11,7 +11,7 @@
 #include <poll.h>
 #include <unistd.h>
 
-#include "../../MangoHud-2/common/socket.hpp"
+#include "../../mangohud-server/common/socket.hpp"
 #include "server_connection.hpp"
 #include "hud_elements.h"
 
