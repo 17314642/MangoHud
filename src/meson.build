@@ -81,7 +81,6 @@ if is_unixy
     'server_connection.cpp',
     '../../MangoHud-2/common/socket.cpp',
 
-    'cpu.cpp',
     'iostats.cpp',
     'notify.cpp',
     'elfhacks.c',

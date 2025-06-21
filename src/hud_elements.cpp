@@ -11,7 +11,6 @@
 #include "logging.h"
 #include "battery.h"
 #include "device.h"
-#include "cpu.h"
 #include "iostats.h"
 #include "mesa/util/macros.h"
 #include "string_utils.h"
@@ -464,11 +463,13 @@ void HudElements::cpu_stats(){
         else
             cpu_text = HUDElements.params->cpu_text.c_str();
 
+        mangohud_message& m = HUDElements.current_metrics;
+        cpu_info_t cpu = m.cpu;
+
         HUDElements.TextColored(HUDElements.colors.cpu, "%s", cpu_text);
         ImguiNextColumnOrNewRow();
         auto text_color = HUDElements.colors.text;
         if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_cpu_load_change]){
-            int cpu_load_percent = int(cpuStats.GetCPUDataTotal().percent);
             struct LOAD_DATA cpu_data = {
                 HUDElements.colors.cpu_load_low,
                 HUDElements.colors.cpu_load_med,
@@ -477,13 +478,13 @@ void HudElements::cpu_stats(){
                 HUDElements.params->cpu_load_value[1]
             };
 
-            auto load_color = change_on_load_temp(cpu_data, cpu_load_percent);
-            right_aligned_text(load_color, HUDElements.ralign_width, "%d", cpu_load_percent);
+            auto load_color = change_on_load_temp(cpu_data, cpu.load);
+            right_aligned_text(load_color, HUDElements.ralign_width, "%d", cpu.load);
             ImGui::SameLine(0, 1.0f);
             HUDElements.TextColored(load_color, "%%");
         }
         else {
-            right_aligned_text(text_color, HUDElements.ralign_width, "%d", int(cpuStats.GetCPUDataTotal().percent));
+            right_aligned_text(text_color, HUDElements.ralign_width, "%d", cpu.load);
             ImGui::SameLine(0, 1.0f);
             HUDElements.TextColored(HUDElements.colors.text, "%%");
         }
@@ -491,9 +492,9 @@ void HudElements::cpu_stats(){
         if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_cpu_temp]){
             ImguiNextColumnOrNewRow();
             if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_temp_fahrenheit])
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(cpuStats.GetCPUDataTotal().temp));
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", HUDElements.convert_to_fahrenheit(cpu.temp));
             else
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", cpuStats.GetCPUDataTotal().temp);
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", cpu.temp);
             ImGui::SameLine(0, 1.0f);
             if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact])
                 HUDElements.TextColored(HUDElements.colors.text, "°");
@@ -506,7 +507,7 @@ void HudElements::cpu_stats(){
 
         if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_cpu_mhz]){
             ImguiNextColumnOrNewRow();
-            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", cpuStats.GetCPUDataTotal().cpu_mhz);
+            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", cpu.frequency);
             ImGui::SameLine(0, 1.0f);
             ImGui::PushFont(HUDElements.sw_stats->font1);
             HUDElements.TextColored(HUDElements.colors.text, "MHz");
@@ -515,15 +516,18 @@ void HudElements::cpu_stats(){
 
         if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_cpu_power]){
             ImguiNextColumnOrNewRow();
-            char str[16];
-            snprintf(str, sizeof(str), "%.1f", cpuStats.GetCPUDataTotal().power);
-            if (strlen(str) > 4)
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.0f", cpuStats.GetCPUDataTotal().power);
+
+            if (cpu.power > 100.f)
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.0f", cpu.power);
             else
-                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", cpuStats.GetCPUDataTotal().power);
+                right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%.1f", cpu.power);
+
             ImGui::SameLine(0, 1.0f);
+
             ImGui::PushFont(HUDElements.sw_stats->font1);
+
             HUDElements.TextColored(HUDElements.colors.text, "W");
+
             ImGui::PopFont();
         }
     }
@@ -532,7 +536,7 @@ void HudElements::cpu_stats(){
 
 static float get_core_load_stat(void*,int);
 static float get_core_load_stat(void *data, int idx){
-    return ((CPUStats *)data)->GetCPUData().at(idx).percent;
+    return HUDElements.current_metrics.cores[idx].load;
 }
 
 void HudElements::core_load(){
@@ -562,8 +566,8 @@ void HudElements::core_load(){
         }
 
         if (ImGui::BeginChild("core_bars_window", ImVec2(width, height))) {
-            ImGui::PlotHistogram(hash, get_core_load_stat, &cpuStats,
-                                cpuStats.GetCPUData().size(), 0,
+            ImGui::PlotHistogram(hash, get_core_load_stat, nullptr,
+                                HUDElements.current_metrics.num_of_cores, 0,
                                 NULL, 0.0, 100.0,
                                 ImVec2(width, height));
         }
@@ -571,23 +575,27 @@ void HudElements::core_load(){
         ImGui::PopFont();
         ImGui::PopStyleColor();
     } else {
-        for (const CPUData &cpuData : cpuStats.GetCPUData())
-        {
+
+        mangohud_message& m = HUDElements.current_metrics;
+
+        for (uint16_t i = 0; i < HUDElements.current_metrics.num_of_cores; i++) {
+            core_info_t& core = m.cores[i];
+
             ImguiNextColumnFirstItem();
             HUDElements.TextColored(HUDElements.colors.cpu, "CPU");
             ImGui::SameLine(0, 1.0f);
             ImGui::PushFont(HUDElements.sw_stats->font1);
 
             if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_core_type])
-                HUDElements.TextColored(HUDElements.colors.cpu, cpuData.label.c_str());
+                HUDElements.TextColored(HUDElements.colors.cpu, "todo core_type");
             else
-                HUDElements.TextColored(HUDElements.colors.cpu, "%i", cpuData.cpu_id);
+                HUDElements.TextColored(HUDElements.colors.cpu, "%i", i);
 
             ImGui::PopFont();
             ImguiNextColumnOrNewRow();
             auto text_color = HUDElements.colors.text;
+
             if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_core_load_change]){
-                int cpu_load_percent = int(cpuData.percent);
                 struct LOAD_DATA cpu_data = {
                     HUDElements.colors.cpu_load_low,
                     HUDElements.colors.cpu_load_med,
@@ -595,19 +603,19 @@ void HudElements::core_load(){
                     HUDElements.params->cpu_load_value[0],
                     HUDElements.params->cpu_load_value[1]
                 };
-                auto load_color = change_on_load_temp(cpu_data, cpu_load_percent);
-                right_aligned_text(load_color, HUDElements.ralign_width, "%d", cpu_load_percent);
+                auto load_color = change_on_load_temp(cpu_data, core.load);
+                right_aligned_text(load_color, HUDElements.ralign_width, "%d", core.load);
                 ImGui::SameLine(0, 1.0f);
                 HUDElements.TextColored(load_color, "%%");
                 ImguiNextColumnOrNewRow();
             }
             else {
-                right_aligned_text(text_color, HUDElements.ralign_width, "%i", int(cpuData.percent));
+                right_aligned_text(text_color, HUDElements.ralign_width, "%i", core.load);
                 ImGui::SameLine(0, 1.0f);
                 HUDElements.TextColored(HUDElements.colors.text, "%%");
                 ImguiNextColumnOrNewRow();
             }
-            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", cpuData.mhz);
+            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, "%i", core.frequency);
             ImGui::SameLine(0, 1.0f);
             ImGui::PushFont(HUDElements.sw_stats->font1);
             HUDElements.TextColored(HUDElements.colors.text, "MHz");

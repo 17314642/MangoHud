@@ -10,7 +10,6 @@
 #include <filesystem.h>
 
 #include "overlay.h"
-#include "cpu.h"
 #include "timing.hpp"
 #include "fcat.h"
 #include "mesa/util/macros.h"
@@ -115,18 +114,6 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
 {
    if (params.enabled[OVERLAY_PARAM_ENABLED_fan])
       update_fan();
-   if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_stats] || logger->is_active()) {
-      cpuStats.UpdateCPUData();
-
-#ifdef __linux__
-      if (params.enabled[OVERLAY_PARAM_ENABLED_core_load] || params.enabled[OVERLAY_PARAM_ENABLED_cpu_mhz] || logger->is_active())
-         cpuStats.UpdateCoreMhz();
-      if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_temp] || logger->is_active() || params.enabled[OVERLAY_PARAM_ENABLED_graphs])
-         cpuStats.UpdateCpuTemp();
-      if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_power] || logger->is_active())
-         cpuStats.UpdateCpuPower();
-#endif
-   }
 
 #ifdef __linux__
    if (params.enabled[OVERLAY_PARAM_ENABLED_battery])
@@ -165,10 +152,10 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
     currentLogData.process_rss = HUDElements.current_metrics.memory.process_resident / float((2 << 29)); // GiB, consistent w/ other mem stats
 #endif
 
-   currentLogData.cpu_load = cpuStats.GetCPUDataTotal().percent;
-   currentLogData.cpu_temp = cpuStats.GetCPUDataTotal().temp;
-   currentLogData.cpu_power = cpuStats.GetCPUDataTotal().power;
-   currentLogData.cpu_mhz = cpuStats.GetCPUDataTotal().cpu_mhz;
+   currentLogData.cpu_load  = HUDElements.current_metrics.cpu.load;
+   currentLogData.cpu_temp  = HUDElements.current_metrics.cpu.temp;
+   currentLogData.cpu_power = HUDElements.current_metrics.cpu.power;
+   currentLogData.cpu_mhz   = HUDElements.current_metrics.cpu.frequency;
 
     {
         std::unique_lock<std::mutex> lock_global_metrics(g_metrics_lock);
@@ -764,16 +751,7 @@ void render_imgui(swapchain_stats& data, struct overlay_params& params, ImVec2& 
      }
 }
 
-void init_cpu_stats(overlay_params& params)
-{
-#ifdef __linux__
-   auto& enabled = params.enabled;
-   enabled[OVERLAY_PARAM_ENABLED_cpu_stats] = cpuStats.Init()
-                           && enabled[OVERLAY_PARAM_ENABLED_cpu_stats];
-   enabled[OVERLAY_PARAM_ENABLED_cpu_temp] = cpuStats.GetCpuFile()
-                           && enabled[OVERLAY_PARAM_ENABLED_cpu_temp];
-#endif
-}
+void init_cpu_stats(overlay_params& params) {}
 
 struct pci_bus {
    int domain;
