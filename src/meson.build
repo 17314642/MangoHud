@@ -79,7 +79,7 @@ endif
 if is_unixy
   vklayer_files += files(
     'server_connection.cpp',
-    '../../MangoHud-2/common/socket.cpp',
+    '../../mangohud-server/common/socket.cpp',
 
     'iostats.cpp',
     'notify.cpp',
