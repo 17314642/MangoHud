@@ -81,7 +81,6 @@ if is_unixy
     'server_connection.cpp',
     '../../mangohud-server/common/socket.cpp',
 
-    'iostats.cpp',
     'notify.cpp',
     'elfhacks.c',
     'real_dlsym.c',

@@ -11,7 +11,6 @@
 #include "logging.h"
 #include "battery.h"
 #include "device.h"
-#include "iostats.h"
 #include "mesa/util/macros.h"
 #include "string_utils.h"
 #include "app/mangoapp.h"
@@ -625,36 +624,70 @@ void HudElements::core_load(){
 }
 
 void HudElements::io_stats(){
-#ifndef _WIN32
-    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] || HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]){
-        ImguiNextColumnFirstItem();
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] && !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write])
-            HUDElements.TextColored(HUDElements.colors.io, "IO RD");
-        else if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] && HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write])
-            HUDElements.TextColored(HUDElements.colors.io, "IO RW");
-        else if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write] && !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read])
-            HUDElements.TextColored(HUDElements.colors.io, "IO WR");
+    if (
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] &&
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]
+    )
+        return;
 
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read]){
-            ImguiNextColumnOrNewRow();
-            const float val = g_io_stats.per_second.read;
-            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, val < 100 ? "%.1f" : "%.f", val);
-            ImGui::SameLine(0,1.0f);
-            ImGui::PushFont(HUDElements.sw_stats->font1);
-            HUDElements.TextColored(HUDElements.colors.text, "MiB/s");
-            ImGui::PopFont();
-        }
-        if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]){
-            ImguiNextColumnOrNewRow();
-            const float val = g_io_stats.per_second.write;
-            right_aligned_text(HUDElements.colors.text, HUDElements.ralign_width, val < 100 ? "%.1f" : "%.f", val);
-            ImGui::SameLine(0,1.0f);
-            ImGui::PushFont(HUDElements.sw_stats->font1);
-            HUDElements.TextColored(HUDElements.colors.text, "MiB/s");
-            ImGui::PopFont();
-        }
+    ImguiNextColumnFirstItem();
+
+    mangohud_message& m = HUDElements.current_metrics;
+    std::string text;
+
+    if (
+        HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] &&
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]
+    )
+        text = "IO RD";
+    else if (
+        HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read] &&
+        HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]
+    )
+        text = "IO RW";
+    else if (
+        HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write] && 
+        !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read]
+    )
+        text = "IO WR";
+
+    HUDElements.TextColored(HUDElements.colors.io, text.c_str());
+
+    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_read]) {
+        ImguiNextColumnOrNewRow();
+
+        const float val = m.io_stats.read_mb_per_sec;
+
+        right_aligned_text(
+            HUDElements.colors.text, HUDElements.ralign_width,
+            val < 100.f ? "%.1f" : "%.f", val
+        );
+
+        ImGui::SameLine(0,1.0f);
+        ImGui::PushFont(HUDElements.sw_stats->font1);
+
+        HUDElements.TextColored(HUDElements.colors.text, "MiB/s");
+
+        ImGui::PopFont();
     }
-#endif
+
+    if (HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_io_write]) {
+        ImguiNextColumnOrNewRow();
+
+        const float val = m.io_stats.write_mb_per_sec;
+
+        right_aligned_text(
+            HUDElements.colors.text, HUDElements.ralign_width,
+            val < 100.f ? "%.1f" : "%.f", val
+        );
+
+        ImGui::SameLine(0,1.0f);
+        ImGui::PushFont(HUDElements.sw_stats->font1);
+
+        HUDElements.TextColored(HUDElements.colors.text, "MiB/s");
+
+        ImGui::PopFont();
+    }
 }
 
 void HudElements::vram() {

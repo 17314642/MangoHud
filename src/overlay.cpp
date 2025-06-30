@@ -18,7 +18,6 @@
 #include "string_utils.h"
 #include "file_utils.h"
 #include "pci_ids.h"
-#include "iostats.h"
 #include "fps_metrics.h"
 #include "net.h"
 #include "fex.h"
@@ -124,9 +123,6 @@ void update_hw_info(const struct overlay_params& params, uint32_t vendorID)
             device_info();
       }
    }
-
-   if (params.enabled[OVERLAY_PARAM_ENABLED_io_read] || params.enabled[OVERLAY_PARAM_ENABLED_io_write])
-      getIoStats(g_io_stats);
 #endif
 
     uint8_t gpu_idx = 0;
