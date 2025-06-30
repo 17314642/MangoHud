@@ -75,6 +75,7 @@
 #include <glad/glad.h>
 
 #include "overlay.h"
+#include "../server_connection.hpp"
 
 namespace MangoHud { namespace GL {
 
@@ -470,6 +471,8 @@ bool    ImGui_ImplOpenGL3_Init(const char* glsl_version)
     // Desktop OpenGL 3/4 need a function loader. See the IMGUI_IMPL_OPENGL_LOADER_xxx explanation above.
     GLint current_texture;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
+
+    setup_connection_to_server();
 
     return true;
 }
